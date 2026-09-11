@@ -97,7 +97,7 @@ export const MemberProfileModal: React.FC<MemberProfileModalProps> = ({
                   )}
                 </div>
                 <p className="text-sm font-semibold text-cyan-400">{member.major}</p>
-                <p className="text-xs text-slate-400">{member.academicYear} • Al-Baha University</p>
+                <p className="text-xs text-slate-400">{member.academicYear} • Tuwaiq Club</p>
               </div>
             </div>
 

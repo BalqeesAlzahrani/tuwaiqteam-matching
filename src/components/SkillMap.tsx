@@ -109,7 +109,7 @@ export const SkillMap: React.FC<SkillMapProps> = ({
             Tuwaiq Skill Map & Density
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-medium">
-            Explore the collective skills, strengths, and talent clusters across Al-Baha University's Technology & Entrepreneurship Track.
+            Explore the collective skills, strengths, and talent clusters across Tuwaiq Club.
           </p>
         </div>
       </div>

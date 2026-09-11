@@ -70,29 +70,98 @@ export function subscribeToMembers(
 }
 
 /**
+ * Recursively remove undefined keys so Firestore never throws 'Unsupported field value: undefined'
+ */
+function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeForFirestore(item)) as any;
+  }
+  if (typeof data === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned as T;
+  }
+  return data;
+}
+
+/**
  * Persist or update a member profile in Firestore
+ * Enforces authenticated user ownership and prevents undefined values
  */
 export async function saveMemberProfile(member: Member): Promise<void> {
-  const docRef = doc(db, MEMBERS_COL, member.id);
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser || !currentAuthUser.uid) {
+    console.error('saveMemberProfile failed: No authenticated user session in Firebase Auth.');
+    throw new Error("Your profile couldn't be saved. Please make sure you're signed in and try again.");
+  }
+
+  const ownerUid = currentAuthUser.uid;
+
+  // Validation
+  if (!member.name || !member.name.trim()) {
+    throw new Error("Your profile couldn't be saved. Please enter your name.");
+  }
+  if (!member.skills || member.skills.length === 0) {
+    throw new Error("Your profile couldn't be saved. Please select at least one skill.");
+  }
+
+  // Generate or preserve ID
+  const memberId = member.id || `mem-${ownerUid.substring(0, 10)}`;
+  const docRef = doc(db, MEMBERS_COL, memberId);
 
   // Retrieve or generate secure device owner token for this profile
-  let ownerKey = member.ownerKey || getMemberOwnerKey(member.id);
+  let ownerKey = member.ownerKey || getMemberOwnerKey(memberId);
   if (!ownerKey) {
     ownerKey = generateOwnerKey();
   }
 
   const payload: Member = {
-    ...member,
+    id: memberId,
+    name: member.name.trim(),
+    nameAr: member.nameAr?.trim() || undefined,
+    major: member.major?.trim() || 'Technology & Entrepreneurship',
+    majorAr: member.majorAr?.trim() || undefined,
+    academicYear: member.academicYear || 'Sophomore (Year 2)',
+    avatar: member.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80',
+    bio: member.bio?.trim() || '',
+    skills: Array.isArray(member.skills) ? member.skills : [],
+    skillCategories: Array.isArray(member.skillCategories) && member.skillCategories.length > 0 ? member.skillCategories : ['TECH'],
+    interests: Array.isArray(member.interests) ? member.interests : [],
+    experience: member.experience?.trim() || '',
+    canHelpWith: member.canHelpWith?.trim() || 'Frontend development and ideation.',
+    lookingFor: member.lookingFor?.trim() || 'Teammates with complementary skills.',
+    competitionInterests: Array.isArray(member.competitionInterests) && member.competitionInterests.length > 0 ? member.competitionInterests : ['Tuwaiq Innovation Challenge 2026'],
+    contact: {
+      email: (member.contact?.email?.trim() || currentAuthUser.email || '').trim(),
+      github: member.contact?.github?.trim() || undefined,
+      linkedin: member.contact?.linkedin?.trim() || undefined,
+      portfolio: member.contact?.portfolio?.trim() || undefined,
+      telegram: member.contact?.telegram?.trim() || undefined,
+    },
+    isAvailableForTeam: typeof member.isAvailableForTeam === 'boolean' ? member.isAvailableForTeam : true,
+    createdAt: member.createdAt || new Date().toISOString().split('T')[0],
+    ownerUid,
     ownerKey,
-    ownerUid: auth.currentUser?.uid || member.ownerUid,
   };
 
+  const sanitized = sanitizeForFirestore(payload);
+
   try {
-    await setDoc(docRef, payload, { merge: true });
-    setMemberOwnerKey(member.id, ownerKey);
-  } catch (err) {
+    await setDoc(docRef, sanitized, { merge: true });
+    setMemberOwnerKey(memberId, ownerKey);
+  } catch (err: any) {
     console.error('Error saving member to Firestore:', err);
-    throw err;
+    if (err?.code === 'permission-denied') {
+      throw new Error("Permission denied. You can only update your own profile.");
+    }
+    throw new Error("Your profile couldn't be saved. Please make sure you're signed in and try again.");
   }
 }
 
@@ -143,7 +212,7 @@ export function subscribeToTeams(
 export async function saveTeamToFirestore(team: Team): Promise<void> {
   try {
     const docRef = doc(db, TEAMS_COL, team.id);
-    await setDoc(docRef, team, { merge: true });
+    await setDoc(docRef, sanitizeForFirestore(team), { merge: true });
   } catch (err) {
     console.error('Error saving team to Firestore:', err);
   }
@@ -158,7 +227,7 @@ export async function saveTeamsBatchToFirestore(teamsList: Team[]): Promise<void
     const batch = writeBatch(db);
     teamsList.forEach((team) => {
       const docRef = doc(db, TEAMS_COL, team.id);
-      batch.set(docRef, team, { merge: true });
+      batch.set(docRef, sanitizeForFirestore(team), { merge: true });
     });
     await batch.commit();
   } catch (err) {
@@ -207,7 +276,7 @@ export function subscribeToInvitations(
 export async function saveInvitationToFirestore(invite: TeamInvitation): Promise<void> {
   try {
     const docRef = doc(db, INVITATIONS_COL, invite.id);
-    await setDoc(docRef, invite, { merge: true });
+    await setDoc(docRef, sanitizeForFirestore(invite), { merge: true });
   } catch (err) {
     console.error('Error saving invitation to Firestore:', err);
   }

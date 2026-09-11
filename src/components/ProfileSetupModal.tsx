@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
+import { User } from 'firebase/auth';
 import { Member, SkillCategory, AcademicYear } from '../types';
 import { SKILL_CATEGORIES_DATA, DEFAULT_COMPETITIONS } from '../data/mockData';
+import { auth } from '../lib/firebase';
 import {
   X,
   Plus,
@@ -12,14 +14,16 @@ import {
   Trash2,
   Trophy,
   Link as LinkIcon,
+  Loader2,
 } from 'lucide-react';
 
 interface ProfileSetupModalProps {
   initialMember?: Member | null;
   currentProfile?: Member | null;
+  authUser?: User | null;
   isOpen?: boolean;
-  onSave?: (member: Member) => void;
-  onSaveProfile?: (member: Member) => void;
+  onSave?: (member: Member) => Promise<void> | void;
+  onSaveProfile?: (member: Member) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -44,21 +48,23 @@ const COMMON_INTERESTS = [
 export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
   initialMember,
   currentProfile,
+  authUser,
   isOpen = true,
   onSave,
   onSaveProfile,
   onClose,
 }) => {
+  const currentAuthUser = authUser || auth.currentUser;
   const profile = currentProfile || initialMember;
   const saveHandler = onSave || onSaveProfile;
 
-  const [name, setName] = useState(profile?.name || '');
+  const [name, setName] = useState(profile?.name || currentAuthUser?.displayName || '');
   const [nameAr, setNameAr] = useState(profile?.nameAr || '');
   const [major, setMajor] = useState(profile?.major || '');
   const [academicYear, setAcademicYear] = useState<AcademicYear>(
     (profile?.academicYear as AcademicYear) || 'Sophomore (Year 2)'
   );
-  const [avatar, setAvatar] = useState(profile?.avatar || DEFAULT_AVATAR);
+  const [avatar, setAvatar] = useState(profile?.avatar || currentAuthUser?.photoURL || DEFAULT_AVATAR);
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const [isDraggingPhoto, setIsDraggingPhoto] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,12 +89,13 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
   );
   const [customCompetitionInput, setCustomCompetitionInput] = useState('');
 
-  const [email, setEmail] = useState(profile?.contact?.email || '');
+  const [email, setEmail] = useState(profile?.contact?.email || currentAuthUser?.email || '');
   const [github, setGithub] = useState(profile?.contact?.github || '');
   const [linkedin, setLinkedin] = useState(profile?.contact?.linkedin || '');
   const [portfolio, setPortfolio] = useState(profile?.contact?.portfolio || '');
   const [activeTab, setActiveTab] = useState<'basics' | 'skills' | 'synergy' | 'contact'>('basics');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Handle Photo File Upload
   const handlePhotoFile = (file: File) => {
@@ -192,8 +199,10 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
     return Array.from(cats);
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
+
     if (!name.trim()) {
       setErrorMsg('Please enter your full name.');
       setActiveTab('basics');
@@ -205,13 +214,20 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
       return;
     }
 
+    const effectiveUid = authUser?.uid || auth.currentUser?.uid || profile?.ownerUid;
+    if (!effectiveUid) {
+      setErrorMsg('You must be signed in with Firebase Authentication to create or update your profile.');
+      return;
+    }
+
     const categories = deriveCategories(selectedSkills);
+    const finalEmail = email.trim() || authUser?.email || auth.currentUser?.email || '';
 
     const updatedMember: Member = {
-      id: profile?.id || `mem-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: profile?.id || `mem-${effectiveUid.substring(0, 10)}`,
       name: name.trim(),
       nameAr: nameAr.trim() || undefined,
-      major: major.trim(),
+      major: major.trim() || 'Technology & Entrepreneurship',
       academicYear,
       avatar: customAvatarUrl.trim() || avatar,
       bio: bio.trim(),
@@ -224,7 +240,7 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
       competitionInterests:
         selectedCompetitions.length > 0 ? selectedCompetitions : ['Tuwaiq Innovation Challenge 2026'],
       contact: {
-        email: email.trim() || `${name.toLowerCase().replace(/\s+/g, '')}@stu.bu.edu.sa`,
+        email: finalEmail,
         github: github.trim() || undefined,
         linkedin: linkedin.trim() || undefined,
         portfolio: portfolio.trim() || undefined,
@@ -232,13 +248,21 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
       isAvailableForTeam: true,
       createdAt: profile?.createdAt || new Date().toISOString().split('T')[0],
       ownerKey: profile?.ownerKey,
-      ownerUid: profile?.ownerUid,
+      ownerUid: effectiveUid,
     };
 
-    if (saveHandler) {
-      saveHandler(updatedMember);
+    setIsSubmitting(true);
+    try {
+      if (saveHandler) {
+        await saveHandler(updatedMember);
+      }
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to save profile:', err);
+      setErrorMsg(err?.message || "Your profile couldn't be saved. Please make sure you're signed in and try again.");
+    } finally {
+      setIsSubmitting(false);
     }
-    onClose();
   };
 
   if (!isOpen) return null;
@@ -257,7 +281,7 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
                 <Sparkles className="w-4 h-4" />
               </span>
               <span className="text-xs font-bold uppercase tracking-wider text-purple-300">
-                Tuwaiq Club • مسار ريادة الأعمال والتقنية
+                Tuwaiq Club • نادي طويق
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-white">
@@ -764,7 +788,7 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@stu.bu.edu.sa"
+                  placeholder="Enter your contact email address"
                   className="w-full px-4 py-2.5 rounded-xl bg-purple-950/60 border border-purple-800/60 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 text-sm"
                 />
               </div>
@@ -816,7 +840,7 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
                   <span>Tuwaiq Community Pledge</span>
                 </div>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  By joining, you become part of the Al-Baha University Technology & Entrepreneurship Track talent ecosystem, connecting with ambitious peers to form winning competition squads.
+                  By joining, you become part of the Tuwaiq Club talent ecosystem, connecting with ambitious peers to form winning competition squads.
                 </p>
               </div>
             </div>
@@ -858,7 +882,8 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl bg-transparent hover:bg-purple-950 text-slate-400 hover:text-white text-xs font-semibold"
+                disabled={isSubmitting}
+                className="px-4 py-2 rounded-xl bg-transparent hover:bg-purple-950 text-slate-400 hover:text-white text-xs font-semibold disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -866,10 +891,21 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
               <button
                 id="btn-save-member-profile"
                 type="submit"
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white text-xs sm:text-sm font-bold shadow-lg shadow-purple-900/50 transition-all active:scale-95 flex items-center gap-2"
+                disabled={isSubmitting}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white text-xs sm:text-sm font-bold shadow-lg shadow-purple-900/50 transition-all active:scale-95 flex items-center gap-2 disabled:opacity-60"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>{initialMember ? 'Save Profile' : 'Publish Tuwaiq Profile'}</span>
+                {isSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4" />
+                )}
+                <span>
+                  {isSubmitting
+                    ? 'Saving...'
+                    : initialMember
+                    ? 'Save Profile'
+                    : 'Publish Tuwaiq Profile'}
+                </span>
               </button>
             </div>
           </div>

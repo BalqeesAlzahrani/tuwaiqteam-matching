@@ -10,50 +10,46 @@ service cloud.firestore {
 
     // Members collection: Public directory for Tuwaiq Club
     match /members/{memberId} {
-      // 1. Anyone (all students & visitors) can read member profiles to discover teammates
+      // 1. All visitors & members can read member profiles to discover teammates
       allow read: if true;
 
-      // 2. New member profile registration
-      allow create: if request.resource.data.id == memberId
+      // 2. Authenticated user can create their own profile
+      allow create: if isAuthenticated()
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.id == memberId
                     && request.resource.data.name is string
                     && request.resource.data.name.size() > 0;
 
-      // 3. Only the owner can update their own profile; members cannot modify others
-      allow update: if request.resource.data.id == memberId
+      // 3. Authenticated user can only update their own profile; cannot modify others
+      allow update: if isAuthenticated()
+                    && request.resource.data.id == memberId
+                    && request.resource.data.ownerUid == request.auth.uid
                     && (
-                      // Firebase Auth verified owner (UID or verified email)
-                      (isAuthenticated() && (
-                        (resource.data.ownerUid != null && resource.data.ownerUid == request.auth.uid) ||
-                        (resource.data.contact.email != null && request.auth.token.email != null && resource.data.contact.email == request.auth.token.email)
-                      ))
+                      // Profile owner matching authenticated UID
+                      resource.data.ownerUid == request.auth.uid
                       ||
-                      // Device / Client ownerKey verification
-                      (resource.data.ownerKey != null && request.resource.data.ownerKey == resource.data.ownerKey)
-                      ||
-                      // Initial claim for legacy records without ownerKey
-                      (resource.data.ownerKey == null && request.resource.data.ownerKey != null)
+                      // Legacy profile claim via verified matching email if ownerUid wasn't set
+                      (resource.data.ownerUid == null && resource.data.contact.email != null && request.auth.token.email != null && resource.data.contact.email == request.auth.token.email)
                     );
 
-      // 4. Members cannot delete other members' profiles
-      allow delete: if isAuthenticated() && (
-        resource.data.ownerUid == request.auth.uid ||
-        (resource.data.contact.email != null && request.auth.token.email != null && resource.data.contact.email == request.auth.token.email)
-      );
+      // 4. Authenticated user can only delete their own profile
+      allow delete: if isAuthenticated() && resource.data.ownerUid == request.auth.uid;
     }
 
     // Teams collection
     match /teams/{teamId} {
       allow read: if true;
-      allow create: if request.resource.data.id == teamId
+      allow create: if isAuthenticated()
+                    && request.resource.data.id == teamId
                     && request.resource.data.name is string;
-      allow update: if request.resource.data.id == teamId;
-      allow delete: if isAuthenticated() && resource.data.creatorId == request.auth.uid;
+      allow update: if isAuthenticated() && request.resource.data.id == teamId;
+      allow delete: if isAuthenticated() && (resource.data.creatorId == request.auth.uid || resource.data.creatorId == null);
     }
 
     // Invitations collection
     match /invitations/{invitationId} {
       allow read: if true;
-      allow create, update: if request.resource.data.id == invitationId;
+      allow create, update: if isAuthenticated() && request.resource.data.id == invitationId;
       allow delete: if isAuthenticated();
     }
 

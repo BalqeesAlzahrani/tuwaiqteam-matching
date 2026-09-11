@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { User } from 'firebase/auth';
 import { Member, TeamInvitation } from '../types';
 import { TuwaiqLogo } from './TuwaiqLogo';
 import {
@@ -17,6 +18,7 @@ import {
   UserCheck,
   LogOut,
   LogIn,
+  Shield,
 } from 'lucide-react';
 
 export type NavSection =
@@ -33,6 +35,7 @@ interface NavbarProps {
   currentSection: NavSection;
   onNavigate: (section: NavSection) => void;
   currentUser: Member | null;
+  authUser?: User | null;
   allMembers?: Member[];
   onOpenProfileSetup: () => void;
   onOpenSignIn?: () => void;
@@ -45,6 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentSection,
   onNavigate,
   currentUser,
+  authUser,
   allMembers = [],
   onOpenProfileSetup,
   onOpenSignIn,
@@ -196,11 +200,33 @@ export const Navbar: React.FC<NavbarProps> = ({
                           className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-rose-300 hover:bg-rose-950/40 flex items-center gap-2 border-t border-purple-900/40 mt-1 pt-2"
                         >
                           <LogOut className="w-4 h-4 text-rose-400" />
-                          <span>Sign Out on this Device</span>
+                          <span>Sign Out</span>
                         </button>
                       )}
                     </div>
                   </div>
+                )}
+              </div>
+            ) : authUser ? (
+              <div className="relative flex items-center gap-2">
+                <button
+                  id="btn-nav-create-profile"
+                  onClick={onOpenProfileSetup}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white text-xs font-bold shadow-md shadow-purple-950 flex items-center gap-1.5 transition-transform active:scale-95 border border-white/20"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-yellow-300" />
+                  <span>Complete Tuwaiq Profile</span>
+                </button>
+
+                {onSignOut && (
+                  <button
+                    id="btn-nav-signout-desktop"
+                    onClick={onSignOut}
+                    className="p-2 rounded-xl bg-purple-950/80 hover:bg-rose-950/60 text-purple-300 hover:text-rose-300 border border-purple-800/40 transition-colors"
+                    title={`Signed in as ${authUser.email || 'user'}. Click to sign out.`}
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
                 )}
               </div>
             ) : (
@@ -227,10 +253,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
 
-            {/* If user is logged in, show quick edit button */}
+            {/* If user has an active profile, show quick edit button */}
             {currentUser && (
               <button
-                id="btn-nav-create-profile"
+                id="btn-nav-edit-profile"
                 onClick={onOpenProfileSetup}
                 className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-purple-950/60 flex items-center gap-1.5 transition-transform active:scale-95"
               >
@@ -293,6 +319,38 @@ export const Navbar: React.FC<NavbarProps> = ({
                   className="px-2.5 py-1.5 rounded-lg bg-purple-800 text-purple-100 text-xs font-semibold hover:bg-purple-700"
                 >
                   Edit
+                </button>
+                {onSignOut && (
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      onSignOut();
+                    }}
+                    className="p-1.5 rounded-lg bg-rose-950/60 text-rose-300 hover:bg-rose-900/60"
+                    title="Sign Out"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : authUser ? (
+            <div className="p-3 rounded-2xl bg-purple-950/50 border border-purple-800/40 mb-3 flex items-center justify-between gap-2">
+              <div className="truncate mr-2">
+                <div className="text-xs font-bold text-white truncate">
+                  {authUser.displayName || authUser.email?.split('@')[0] || 'Authenticated User'}
+                </div>
+                <div className="text-[11px] text-cyan-300">Signed In • No profile yet</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onOpenProfileSetup();
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-500 text-white text-xs font-bold"
+                >
+                  Complete Profile
                 </button>
                 {onSignOut && (
                   <button

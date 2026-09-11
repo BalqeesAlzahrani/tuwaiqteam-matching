@@ -120,7 +120,7 @@ export const FindMyTeam: React.FC<FindMyTeamProps> = ({
   // Competitions list (user can add their own!)
   const [competitionsList, setCompetitionsList] = useState<string[]>([
     'Tuwaiq Innovation Challenge 2026',
-    'Al-Baha Smart Cities Hackathon',
+    'Smart Cities Hackathon',
     'Saudi AI Olympiad',
     'FinTech Venture Sprint',
   ]);
@@ -236,7 +236,7 @@ export const FindMyTeam: React.FC<FindMyTeamProps> = ({
           <div className="space-y-3 max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-500/20 border border-pink-400/40 text-pink-300 text-xs font-black uppercase tracking-wider">
               <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
-              <span>Squad Matchmaker Activity • مسار ريادة الأعمال والتقنية</span>
+              <span>Squad Matchmaker Activity • نادي طويق</span>
             </div>
 
             <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight">

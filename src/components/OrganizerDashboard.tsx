@@ -81,8 +81,7 @@ export const OrganizerDashboard: React.FC<OrganizerDashboardProps> = ({
   const handleExportData = () => {
     const summary = {
       exportDate: new Date().toISOString(),
-      club: 'Tuwaiq Club - Al-Baha University',
-      track: 'Technology & Entrepreneurship Track (مسار ريادة الأعمال والتقنية)',
+      club: 'Tuwaiq Club (نادي طويق)',
       totalMembers,
       totalTeams,
       unmatchedMembersCount: unmatchedMembers.length,

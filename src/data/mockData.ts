@@ -109,7 +109,7 @@ export const DEFAULT_COMPETITIONS: Competition[] = [
   {
     id: 'comp-1',
     title: 'Tuwaiq Innovation Challenge 2026',
-    organizer: 'Tuwaiq Club - Al-Baha University',
+    organizer: 'Tuwaiq Club',
     date: 'Oct 2026',
     tag: 'Hackathon',
     recommendedTeamSize: '3-4 members',
@@ -117,7 +117,7 @@ export const DEFAULT_COMPETITIONS: Competition[] = [
   },
   {
     id: 'comp-2',
-    title: 'Al-Baha University FinTech Sprint',
+    title: 'Tuwaiq FinTech Sprint',
     organizer: 'College of Computer Science & Business',
     date: 'Nov 2026',
     tag: 'FinTech',

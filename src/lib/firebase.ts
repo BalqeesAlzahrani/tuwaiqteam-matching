@@ -21,8 +21,4 @@ export const db =
     ? getFirestore(app, firebaseConfigData.firestoreDatabaseId)
     : getFirestore(app);
 
-signInAnonymously(auth).catch((err) => {
-  console.warn('Firebase anonymous auth status:', err?.message || err);
-});
-
 export default app;

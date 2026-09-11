@@ -53,12 +53,12 @@ export const HeroDashboard: React.FC<HeroDashboardProps> = ({
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 rounded-full bg-pink-500/10 blur-3xl pointer-events-none" />
 
         <div className="relative z-10 max-w-4xl mx-auto text-center space-y-6">
-          {/* Track Tag Badge */}
+          {/* Tuwaiq Club Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-purple-500/20 border border-purple-400/40 text-purple-200 text-xs sm:text-sm font-semibold shadow-inner">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-            <span>نادي طويق • جامعة الباحة</span>
-            <span className="text-purple-400">|</span>
-            <span>Technology & Entrepreneurship Track</span>
+            <span>نادي طويق</span>
+            <span className="text-purple-400">•</span>
+            <span>Tuwaiq Club</span>
           </div>
 
           {/* Main Title & Tagline */}

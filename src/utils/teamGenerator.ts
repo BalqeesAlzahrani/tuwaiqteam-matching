@@ -13,7 +13,7 @@ const FUN_TEAM_NAMES = [
   'ByteSparks (شرارة البايت)',
   'Tuwaiq Falcons (صقور طويق)',
   'Apex Pioneers (رواد القمة)',
-  'Al-Baha Innovators (مبتكرو الباحة)',
+  'Tuwaiq Innovators (مبتكرو طويق)',
   'NeuralForge (مصنع النيورال)',
   'PixelCrafters (صناع البكسل)',
   'Quantum Venture (المشروع الكمي)',

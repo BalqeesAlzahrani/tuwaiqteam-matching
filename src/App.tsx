@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { User } from 'firebase/auth';
 import { Member, Team, TeamInvitation } from './types';
 import {
   getStoredMembers,
@@ -27,6 +28,10 @@ import {
   saveBookmarksToFirestore,
   syncLocalToFirestoreIfEmpty,
 } from './lib/firestoreService';
+import {
+  subscribeToAuth,
+  signOutCurrentUser,
+} from './lib/authService';
 import { Navbar, NavSection } from './components/Navbar';
 import { HeroDashboard } from './components/HeroDashboard';
 import { MemberDirectory } from './components/MemberDirectory';
@@ -61,6 +66,7 @@ export default function App() {
   const [members, setMembers] = useState<Member[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [currentUser, setCurrentUser] = useState<Member | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
   const [bookmarks, setBookmarks] = useState<string[]>([]);
 
@@ -71,18 +77,39 @@ export default function App() {
   const [isSignInOpen, setIsSignInOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Initialize Data: Firestore is the primary single source of truth
+  // Initialize Data: Firestore & Firebase Auth
   useEffect(() => {
     // 1. Load active member session & bookmarks for this device
     const loadedUser = getStoredCurrentUser();
     const loadedBookmarks = getStoredBookmarks();
-    setCurrentUser(loadedUser);
+    if (loadedUser) setCurrentUser(loadedUser);
     setBookmarks(loadedBookmarks);
 
     // 2. Initialize Firestore collections if freshly provisioned
     syncLocalToFirestoreIfEmpty();
 
-    // 3. Real-time Firestore subscriptions for live multi-user sync
+    // 3. Real-time Firebase Auth state listener
+    const unsubAuth = subscribeToAuth((user) => {
+      setAuthUser(user);
+      if (user) {
+        // If authenticated, sync with their Firestore member profile
+        setMembers((prevMembers) => {
+          const match = prevMembers.find(
+            (m) =>
+              m.ownerUid === user.uid ||
+              (user.email && m.contact?.email?.toLowerCase() === user.email.toLowerCase())
+          );
+          if (match) {
+            setCurrentUser(match);
+            setCurrentUserId(match.id);
+            saveStoredCurrentUser(match);
+          }
+          return prevMembers;
+        });
+      }
+    });
+
+    // 4. Real-time Firestore subscriptions for live multi-user sync
     const unsubMembers = subscribeToMembers((remoteMembers) => {
       setMembers(remoteMembers);
       // Synchronize active user state if updated in Firestore
@@ -102,6 +129,7 @@ export default function App() {
     });
 
     return () => {
+      unsubAuth();
       unsubMembers();
       unsubTeams();
       unsubInvites();
@@ -128,44 +156,90 @@ export default function App() {
     }, 3500);
   };
 
+  // Guarded handler to open profile setup/edit modal
+  const handleOpenProfileSetup = () => {
+    if (!authUser) {
+      triggerToast('Please sign in or create an account with Firebase Authentication first.');
+      setIsSignInOpen(true);
+      return;
+    }
+    setIsProfileSetupOpen(true);
+  };
+
   // Profile Setup / Edit handler with ownership validation & direct Firestore persistence
   const handleSaveProfile = async (updatedProfile: Member) => {
+    if (!authUser) {
+      triggerToast('⚠️ You must be signed in with Firebase Authentication to save a profile.');
+      setIsSignInOpen(true);
+      return;
+    }
+
     // Security restriction: Members can only edit their own profile
-    const activeUserId = getCurrentUserId();
-    if (activeUserId && activeUserId !== updatedProfile.id) {
+    if (updatedProfile.ownerUid && updatedProfile.ownerUid !== authUser.uid) {
       triggerToast('⚠️ Permission Denied: You can only edit your own profile.');
       return;
     }
 
+    // Ensure ownerUid is strictly the authenticated Firebase UID
+    const profileToSave: Member = {
+      ...updatedProfile,
+      ownerUid: authUser.uid,
+    };
+
     try {
       // 1. Direct persistent write to Firebase Firestore
-      await saveMemberProfile(updatedProfile);
+      await saveMemberProfile(profileToSave);
 
-      // 2. Set this member as current active user on this device
-      setCurrentUser(updatedProfile);
-      saveStoredCurrentUser(updatedProfile);
+      // 2. Set this member as current active user
+      setCurrentUser(profileToSave);
+      setCurrentUserId(profileToSave.id);
+      saveStoredCurrentUser(profileToSave);
 
       triggerToast('✓ Profile successfully saved to Firestore!');
     } catch (err: any) {
       console.error('Error saving profile to Firestore:', err);
       triggerToast('⚠️ Could not save profile: ' + (err?.message || 'Permission denied'));
+      throw err;
     }
   };
 
-  // Sign In / Profile Claim handler
-  const handleSignIn = (member: Member) => {
-    setCurrentUser(member);
-    setCurrentUserId(member.id);
-    saveStoredCurrentUser(member);
-    triggerToast(`Welcome, ${member.name}! Profile active on this device.`);
+  // Auth Success handler
+  const handleAuthSuccess = (user: User) => {
+    setAuthUser(user);
+    // Check if user has an existing member profile in the directory
+    const existing = members.find(
+      (m) =>
+        m.ownerUid === user.uid ||
+        (user.email && m.contact?.email?.toLowerCase() === user.email.toLowerCase())
+    );
+
+    if (existing) {
+      const activeMember: Member = {
+        ...existing,
+        ownerUid: user.uid,
+      };
+      setCurrentUser(activeMember);
+      setCurrentUserId(activeMember.id);
+      saveStoredCurrentUser(activeMember);
+      triggerToast(`Welcome back, ${existing.name}!`);
+    } else {
+      triggerToast('Signed in successfully! Please complete your Tuwaiq student profile.');
+      setIsProfileSetupOpen(true);
+    }
   };
 
   // Sign Out handler
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    try {
+      await signOutCurrentUser();
+    } catch (e) {
+      console.error('Sign out error:', e);
+    }
+    setAuthUser(null);
     setCurrentUser(null);
     setCurrentUserId(null);
     removeStoredCurrentUser();
-    triggerToast('Signed out of this device.');
+    triggerToast('Signed out of Tuwaiq account.');
   };
 
   // Toggle Bookmark handler
@@ -310,8 +384,9 @@ export default function App() {
         currentSection={currentSection}
         onNavigate={setCurrentSection}
         currentUser={currentUser}
+        authUser={authUser}
         allMembers={members}
-        onOpenProfileSetup={() => setIsProfileSetupOpen(true)}
+        onOpenProfileSetup={handleOpenProfileSetup}
         onOpenSignIn={() => setIsSignInOpen(true)}
         onSignOut={handleSignOut}
         pendingInvitations={pendingInvites}
@@ -326,7 +401,7 @@ export default function App() {
             teams={teams}
             currentUser={currentUser}
             onNavigate={setCurrentSection}
-            onOpenProfileSetup={() => setIsProfileSetupOpen(true)}
+            onOpenProfileSetup={handleOpenProfileSetup}
             onViewMemberProfile={(m) => setViewingProfileMember(m)}
           />
         )}
@@ -339,7 +414,7 @@ export default function App() {
             onToggleBookmark={handleToggleBookmark}
             onViewProfile={(m) => setViewingProfileMember(m)}
             onInvite={handleOpenInvite}
-            onOpenRegister={() => setIsProfileSetupOpen(true)}
+            onOpenRegister={handleOpenProfileSetup}
           />
         )}
 
@@ -349,7 +424,7 @@ export default function App() {
             currentUser={currentUser}
             onViewProfile={(m) => setViewingProfileMember(m)}
             onInvite={handleOpenInvite}
-            onOpenProfileSetup={() => setIsProfileSetupOpen(true)}
+            onOpenProfileSetup={handleOpenProfileSetup}
           />
         )}
 
@@ -390,7 +465,7 @@ export default function App() {
             onDeclineInvite={handleDeclineInvite}
             onNavigate={setCurrentSection}
             onViewProfile={(m) => setViewingProfileMember(m)}
-            onOpenProfileSetup={() => setIsProfileSetupOpen(true)}
+            onOpenProfileSetup={handleOpenProfileSetup}
           />
         )}
 
@@ -412,7 +487,7 @@ export default function App() {
             <div>
               <div className="font-extrabold text-white text-sm">Tuwaiq TeamMatch</div>
               <div className="text-[11px] text-purple-300 font-tajawal">
-                مسار ريادة الأعمال والتقنية • نادي طويق • جامعة الباحة
+                نادي طويق • Tuwaiq Club
               </div>
             </div>
           </div>
@@ -461,7 +536,7 @@ export default function App() {
               "مهاراتك. مهاراتهم. فريق واحد."
             </div>
             <div className="text-[10px] text-slate-500">
-              Al-Baha University • Tuwaiq Club © 2026
+              Tuwaiq Club © 2026
             </div>
           </div>
         </div>
@@ -478,7 +553,7 @@ export default function App() {
           onInvite={handleOpenInvite}
           onEdit={() => {
             setViewingProfileMember(null);
-            setIsProfileSetupOpen(true);
+            handleOpenProfileSetup();
           }}
           isBookmarked={bookmarks.includes(viewingProfileMember.id)}
           onToggleBookmark={handleToggleBookmark}
@@ -492,6 +567,7 @@ export default function App() {
           onClose={() => setIsProfileSetupOpen(false)}
           currentProfile={currentUser}
           initialMember={currentUser}
+          authUser={authUser}
           onSaveProfile={handleSaveProfile}
           onSave={handleSaveProfile}
         />
@@ -516,7 +592,7 @@ export default function App() {
           isOpen={isSignInOpen}
           onClose={() => setIsSignInOpen(false)}
           members={members}
-          onSelectMember={handleSignIn}
+          onSuccess={handleAuthSuccess}
         />
       )}
     </div>

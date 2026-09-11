@@ -59,14 +59,11 @@ export const TuwaiqLogo: React.FC<TuwaiqLogoProps> = ({ size = 'md', showText = 
             <span className={`font-extrabold tracking-tight text-white ${sizeMap[size].text}`}>
               Tuwaiq <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-300 bg-clip-text text-transparent">TeamMatch</span>
             </span>
-            <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-              Al-Baha Uni
-            </span>
           </div>
           <span className={`text-slate-400 font-medium ${sizeMap[size].sub} flex items-center gap-1`}>
-            <span>مسار ريادة الأعمال والتقنية</span>
+            <span>نادي طويق</span>
             <span className="text-purple-400">•</span>
-            <span className="text-slate-500">نادي طويق</span>
+            <span className="text-slate-500">Tuwaiq Club</span>
           </span>
         </div>
       )}

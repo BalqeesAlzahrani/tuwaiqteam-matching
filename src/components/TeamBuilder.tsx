@@ -34,7 +34,7 @@ const FUN_NAMES = [
   'ByteSparks',
   'Tuwaiq Falcons',
   'Apex Pioneers',
-  'Al-Baha Innovators',
+  'Tuwaiq Innovators',
   'NeuralForge',
   'PixelCrafters',
   'Quantum Venture',
@@ -196,7 +196,7 @@ export const TeamBuilder: React.FC<TeamBuilderProps> = ({
         const mem = members.find((m) => m.id === tm.memberId);
         return `• ${tm.role}: ${mem?.name || 'Member'}`;
       }),
-      `Built with Tuwaiq TeamMatch - Al-Baha University`,
+      `Built with Tuwaiq TeamMatch - Tuwaiq Club`,
     ];
 
     navigator.clipboard.writeText(lines.join('\n'));
