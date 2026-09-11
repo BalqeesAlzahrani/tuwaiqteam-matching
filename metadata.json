@@ -1,0 +1,6 @@
+{
+  "name": "Tuwaiq TeamMatch",
+  "description": "Interactive team matching and skill discovery platform for the Technology & Entrepreneurship Track at Tuwaiq Club, Al-Baha University.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,66 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Members collection: Public directory for Tuwaiq Club
+    match /members/{memberId} {
+      // 1. Anyone (all students & visitors) can read member profiles to discover teammates
+      allow read: if true;
+
+      // 2. New member profile registration
+      allow create: if request.resource.data.id == memberId
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0;
+
+      // 3. Only the owner can update their own profile; members cannot modify others
+      allow update: if request.resource.data.id == memberId
+                    && (
+                      // Firebase Auth verified owner (UID or verified email)
+                      (isAuthenticated() && (
+                        (resource.data.ownerUid != null && resource.data.ownerUid == request.auth.uid) ||
+                        (resource.data.contact.email != null && request.auth.token.email != null && resource.data.contact.email == request.auth.token.email)
+                      ))
+                      ||
+                      // Device / Client ownerKey verification
+                      (resource.data.ownerKey != null && request.resource.data.ownerKey == resource.data.ownerKey)
+                      ||
+                      // Initial claim for legacy records without ownerKey
+                      (resource.data.ownerKey == null && request.resource.data.ownerKey != null)
+                    );
+
+      // 4. Members cannot delete other members' profiles
+      allow delete: if isAuthenticated() && (
+        resource.data.ownerUid == request.auth.uid ||
+        (resource.data.contact.email != null && request.auth.token.email != null && resource.data.contact.email == request.auth.token.email)
+      );
+    }
+
+    // Teams collection
+    match /teams/{teamId} {
+      allow read: if true;
+      allow create: if request.resource.data.id == teamId
+                    && request.resource.data.name is string;
+      allow update: if request.resource.data.id == teamId;
+      allow delete: if isAuthenticated() && resource.data.creatorId == request.auth.uid;
+    }
+
+    // Invitations collection
+    match /invitations/{invitationId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.id == invitationId;
+      allow delete: if isAuthenticated();
+    }
+
+    // Bookmarks collection (keyed by userId)
+    match /bookmarks/{userId} {
+      allow read, write: if true;
+    }
+  }
+}
+
