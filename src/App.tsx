@@ -159,7 +159,7 @@ export default function App() {
   // Guarded handler to open profile setup/edit modal
   const handleOpenProfileSetup = () => {
     if (!authUser) {
-      triggerToast('Please sign in or create an account with Firebase Authentication first.');
+      triggerToast('Please sign in or create an account first.');
       setIsSignInOpen(true);
       return;
     }
@@ -169,7 +169,7 @@ export default function App() {
   // Profile Setup / Edit handler with ownership validation & direct Firestore persistence
   const handleSaveProfile = async (updatedProfile: Member) => {
     if (!authUser) {
-      triggerToast('⚠️ You must be signed in with Firebase Authentication to save a profile.');
+      triggerToast('⚠️ You must be signed in to save your profile.');
       setIsSignInOpen(true);
       return;
     }
@@ -195,7 +195,7 @@ export default function App() {
       setCurrentUserId(profileToSave.id);
       saveStoredCurrentUser(profileToSave);
 
-      triggerToast('✓ Profile successfully saved to Firestore!');
+      triggerToast('✓ Profile successfully saved!');
     } catch (err: any) {
       console.error('Error saving profile to Firestore:', err);
       triggerToast('⚠️ Could not save profile: ' + (err?.message || 'Permission denied'));
