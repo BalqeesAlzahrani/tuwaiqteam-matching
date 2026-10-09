@@ -103,7 +103,9 @@ export function getFriendlyAuthErrorMessage(error: any): string {
     case 'auth/network-request-failed':
       return 'Network connection error. Please check your internet connection.';
     case 'auth/operation-not-allowed':
-      return 'This sign-in method is not enabled. Please use Google Sign In or contact an administrator.';
+      return 'This sign-in method is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method).';
+    case 'auth/unauthorized-domain':
+      return 'This domain is not authorized in Firebase. Please add this domain to Authorized Domains in the Firebase Console (Authentication > Settings > Authorized Domains).';
     default:
       return error?.message || 'Authentication failed. Please try again.';
   }

@@ -27,11 +27,13 @@ import {
   subscribeToBookmarks,
   saveBookmarksToFirestore,
   syncLocalToFirestoreIfEmpty,
+  testFirestoreConnection,
 } from './lib/firestoreService';
 import {
   subscribeToAuth,
   signOutCurrentUser,
 } from './lib/authService';
+import { auth } from './lib/firebase';
 import { Navbar, NavSection } from './components/Navbar';
 import { HeroDashboard } from './components/HeroDashboard';
 import { MemberDirectory } from './components/MemberDirectory';
@@ -85,13 +87,16 @@ export default function App() {
     if (loadedUser) setCurrentUser(loadedUser);
     setBookmarks(loadedBookmarks);
 
-    // 2. Initialize Firestore collections if freshly provisioned
-    syncLocalToFirestoreIfEmpty();
+    // 2. Validate connection to Firestore
+    testFirestoreConnection();
 
     // 3. Real-time Firebase Auth state listener
     const unsubAuth = subscribeToAuth((user) => {
       setAuthUser(user);
       if (user) {
+        // Safe migration for user's own data if local records exist
+        syncLocalToFirestoreIfEmpty();
+
         // If authenticated, sync with their Firestore member profile
         setMembers((prevMembers) => {
           const match = prevMembers.find(
@@ -113,6 +118,20 @@ export default function App() {
     const unsubMembers = subscribeToMembers((remoteMembers) => {
       setMembers(remoteMembers);
       // Synchronize active user state if updated in Firestore
+      const authed = auth.currentUser;
+      if (authed) {
+        const found = remoteMembers.find(
+          (m) =>
+            m.ownerUid === authed.uid ||
+            (authed.email && m.contact?.email?.toLowerCase() === authed.email.toLowerCase())
+        );
+        if (found) {
+          setCurrentUser(found);
+          setCurrentUserId(found.id);
+          saveStoredCurrentUser(found);
+          return;
+        }
+      }
       const currentId = getCurrentUserId();
       if (currentId) {
         const found = remoteMembers.find((m) => m.id === currentId);
@@ -124,29 +143,39 @@ export default function App() {
       setTeams(remoteTeams);
     });
 
-    const unsubInvites = subscribeToInvitations((remoteInvites) => {
-      setInvitations(remoteInvites);
-    });
-
     return () => {
       unsubAuth();
       unsubMembers();
       unsubTeams();
-      unsubInvites();
     };
   }, []);
 
+  // Sync user-specific invitations with Firestore
+  useEffect(() => {
+    if (!authUser) {
+      setInvitations([]);
+      return;
+    }
+    const unsubInvites = subscribeToInvitations((remoteInvites) => {
+      setInvitations(remoteInvites);
+    });
+    return () => {
+      unsubInvites();
+    };
+  }, [authUser]);
+
   // Sync user-specific bookmarks with Firestore
   useEffect(() => {
-    if (!currentUser?.id) return;
-    const unsubBookmarks = subscribeToBookmarks(currentUser.id, (remoteBookmarks) => {
+    const bookmarkKey = authUser?.uid || currentUser?.id;
+    if (!bookmarkKey) return;
+    const unsubBookmarks = subscribeToBookmarks(bookmarkKey, (remoteBookmarks) => {
       setBookmarks(remoteBookmarks);
       saveStoredBookmarks(remoteBookmarks);
     });
     return () => {
       unsubBookmarks();
     };
-  }, [currentUser?.id]);
+  }, [authUser?.uid, currentUser?.id]);
 
   // Show quick toast notification
   const triggerToast = (msg: string) => {
@@ -243,7 +272,7 @@ export default function App() {
   };
 
   // Toggle Bookmark handler
-  const handleToggleBookmark = (memberId: string) => {
+  const handleToggleBookmark = async (memberId: string) => {
     let nextBookmarks: string[];
     if (bookmarks.includes(memberId)) {
       nextBookmarks = bookmarks.filter((id) => id !== memberId);
@@ -254,104 +283,171 @@ export default function App() {
     }
     setBookmarks(nextBookmarks);
     saveStoredBookmarks(nextBookmarks);
-    if (currentUser?.id) {
-      saveBookmarksToFirestore(currentUser.id, nextBookmarks);
+
+    const bookmarkKey = authUser?.uid || currentUser?.id;
+    if (bookmarkKey) {
+      try {
+        await saveBookmarksToFirestore(bookmarkKey, nextBookmarks);
+      } catch (err) {
+        console.warn('Could not persist bookmark to Firestore:', err);
+      }
     }
   };
 
   // Send Invitation handler
-  const handleSendInvite = (invitationData: Omit<TeamInvitation, 'id' | 'createdAt' | 'status'>) => {
+  const handleSendInvite = async (invitationData: Omit<TeamInvitation, 'id' | 'createdAt' | 'status'>) => {
+    if (!authUser) {
+      triggerToast('⚠️ Please sign in to send invitations.');
+      setIsSignInOpen(true);
+      return;
+    }
+
     const newInvitation: TeamInvitation = {
       ...invitationData,
       id: `inv-${Date.now()}`,
       createdAt: new Date().toISOString().split('T')[0],
       status: 'pending',
+      senderUid: authUser.uid,
     };
 
-    const nextInvitations = [newInvitation, ...invitations];
-    setInvitations(nextInvitations);
-    saveStoredInvitations(nextInvitations);
-    saveInvitationToFirestore(newInvitation);
-
-    triggerToast(`🚀 Invitation sent to ${invitationData.receiverName}!`);
+    try {
+      await saveInvitationToFirestore(newInvitation);
+      const nextInvitations = [newInvitation, ...invitations];
+      setInvitations(nextInvitations);
+      saveStoredInvitations(nextInvitations);
+      triggerToast(`🚀 Invitation sent to ${invitationData.receiverName}!`);
+    } catch (err: any) {
+      console.error('Failed to send invitation:', err);
+      triggerToast('⚠️ Could not send invitation. Please try again.');
+    }
   };
 
   // Accept Invitation handler
-  const handleAcceptInvite = (invitationId: string) => {
+  const handleAcceptInvite = async (invitationId: string) => {
     const invite = invitations.find((i) => i.id === invitationId);
     if (!invite || !currentUser) return;
 
-    // Update invitation status
-    const updatedInvite: TeamInvitation = { ...invite, status: 'accepted' };
-    const nextInvites = invitations.map((i) =>
-      i.id === invitationId ? updatedInvite : i
-    );
-    setInvitations(nextInvites);
-    saveStoredInvitations(nextInvites);
-    saveInvitationToFirestore(updatedInvite);
-
-    // Add user to team
-    let updatedTeam: Team | null = null;
-    const nextTeams = teams.map((t) => {
-      if (t.id === invite.teamId || t.name === invite.teamName) {
-        if (!t.members.some((m) => m.memberId === currentUser.id)) {
-          const modTeam = {
-            ...t,
-            members: [
-              ...t.members,
-              {
-                memberId: currentUser.id,
-                role: invite.roleProposed,
-                category: currentUser.skillCategories[0] || 'TECH',
-              },
-            ],
-          };
-          updatedTeam = modTeam;
-          return modTeam;
-        }
-      }
-      return t;
-    });
-
-    setTeams(nextTeams);
-    saveStoredTeams(nextTeams);
-    if (updatedTeam) {
-      saveTeamToFirestore(updatedTeam);
+    if (!authUser) {
+      triggerToast('⚠️ Please sign in to accept invitations.');
+      setIsSignInOpen(true);
+      return;
     }
-    triggerToast(`🎉 Joined ${invite.teamName}!`);
-  };
 
-  // Decline Invitation handler
-  const handleDeclineInvite = (invitationId: string) => {
-    const invite = invitations.find((i) => i.id === invitationId);
-    if (invite) {
-      const updatedInvite: TeamInvitation = { ...invite, status: 'declined' };
+    try {
+      // Update invitation status
+      const updatedInvite: TeamInvitation = { ...invite, status: 'accepted' };
+      await saveInvitationToFirestore(updatedInvite);
+
+      // Add user to team
+      let updatedTeam: Team | null = null;
+      const nextTeams = teams.map((t) => {
+        if (t.id === invite.teamId || t.name === invite.teamName) {
+          if (!t.members.some((m) => m.memberId === currentUser.id)) {
+            const modTeam = {
+              ...t,
+              members: [
+                ...t.members,
+                {
+                  memberId: currentUser.id,
+                  role: invite.roleProposed,
+                  category: currentUser.skillCategories[0] || 'TECH',
+                },
+              ],
+            };
+            updatedTeam = modTeam;
+            return modTeam;
+          }
+        }
+        return t;
+      });
+
+      if (updatedTeam) {
+        await saveTeamToFirestore(updatedTeam);
+      }
+
       const nextInvites = invitations.map((i) =>
         i.id === invitationId ? updatedInvite : i
       );
       setInvitations(nextInvites);
       saveStoredInvitations(nextInvites);
-      saveInvitationToFirestore(updatedInvite);
+      setTeams(nextTeams);
+      saveStoredTeams(nextTeams);
+
+      triggerToast(`🎉 Joined ${invite.teamName}!`);
+    } catch (err: any) {
+      console.error('Failed to accept invitation:', err);
+      triggerToast('⚠️ Could not accept invitation. Please try again.');
+    }
+  };
+
+  // Decline Invitation handler
+  const handleDeclineInvite = async (invitationId: string) => {
+    const invite = invitations.find((i) => i.id === invitationId);
+    if (!invite) return;
+
+    try {
+      const updatedInvite: TeamInvitation = { ...invite, status: 'declined' };
+      await saveInvitationToFirestore(updatedInvite);
+      const nextInvites = invitations.map((i) =>
+        i.id === invitationId ? updatedInvite : i
+      );
+      setInvitations(nextInvites);
+      saveStoredInvitations(nextInvites);
       triggerToast('Invitation declined');
+    } catch (err: any) {
+      console.error('Failed to decline invitation:', err);
+      triggerToast('⚠️ Could not decline invitation.');
     }
   };
 
   // Save Assembled Team
-  const handleSaveTeam = (newTeam: Team) => {
-    const nextTeams = [newTeam, ...teams.filter((t) => t.id !== newTeam.id)];
-    setTeams(nextTeams);
-    saveStoredTeams(nextTeams);
-    saveTeamToFirestore(newTeam);
-    triggerToast(`🏆 Team "${newTeam.name}" assembled and registered!`);
+  const handleSaveTeam = async (newTeam: Team) => {
+    if (!authUser) {
+      triggerToast('⚠️ Please sign in to save your team.');
+      setIsSignInOpen(true);
+      return;
+    }
+
+    try {
+      const teamToSave: Team = {
+        ...newTeam,
+        creatorUid: authUser.uid,
+      };
+      await saveTeamToFirestore(teamToSave);
+
+      const nextTeams = [teamToSave, ...teams.filter((t) => t.id !== teamToSave.id)];
+      setTeams(nextTeams);
+      saveStoredTeams(nextTeams);
+      triggerToast(`🏆 Team "${teamToSave.name}" assembled and registered!`);
+    } catch (err: any) {
+      console.error('Failed to save team:', err);
+      triggerToast('⚠️ Failed to save team. Please make sure you are signed in.');
+    }
   };
 
   // Save Generated Teams in Batch
-  const handleSaveGeneratedTeams = (generatedTeams: Team[]) => {
-    const nextTeams = [...generatedTeams, ...teams];
-    setTeams(nextTeams);
-    saveStoredTeams(nextTeams);
-    saveTeamsBatchToFirestore(generatedTeams);
-    triggerToast(`✓ Saved ${generatedTeams.length} balanced teams!`);
+  const handleSaveGeneratedTeams = async (generatedTeams: Team[]) => {
+    if (!authUser) {
+      triggerToast('⚠️ Please sign in to save generated teams.');
+      setIsSignInOpen(true);
+      return;
+    }
+
+    try {
+      const teamsWithCreator = generatedTeams.map((t) => ({
+        ...t,
+        creatorUid: authUser.uid,
+      }));
+      await saveTeamsBatchToFirestore(teamsWithCreator);
+
+      const nextTeams = [...teamsWithCreator, ...teams];
+      setTeams(nextTeams);
+      saveStoredTeams(nextTeams);
+      triggerToast(`✓ Saved ${teamsWithCreator.length} balanced teams!`);
+    } catch (err: any) {
+      console.error('Failed to save generated teams:', err);
+      triggerToast('⚠️ Failed to save teams batch. Please try again.');
+    }
   };
 
   // Open invite modal for a member

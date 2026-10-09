@@ -25,7 +25,9 @@
         "competitionInterests": { "type": "array", "items": { "type": "string" } },
         "contact": { "type": "object" },
         "isAvailableForTeam": { "type": "boolean" },
-        "createdAt": { "type": "string" }
+        "createdAt": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "ownerKey": { "type": "string" }
       },
       "required": ["id", "name", "major", "academicYear", "skills", "createdAt"]
     },
@@ -40,6 +42,7 @@
         "description": { "type": "string" },
         "creatorId": { "type": "string" },
         "creatorName": { "type": "string" },
+        "creatorUid": { "type": "string" },
         "members": { "type": "array" },
         "maxMembers": { "type": "number" },
         "requiredSkills": { "type": "array", "items": { "type": "string" } },
@@ -58,8 +61,11 @@
         "teamName": { "type": "string" },
         "senderId": { "type": "string" },
         "senderName": { "type": "string" },
+        "senderUid": { "type": "string" },
         "receiverId": { "type": "string" },
         "receiverName": { "type": "string" },
+        "receiverUid": { "type": "string" },
+        "participants": { "type": "array", "items": { "type": "string" } },
         "roleProposed": { "type": "string" },
         "status": { "type": "string" },
         "message": { "type": "string" },

@@ -5,6 +5,9 @@ import {
   onSnapshot,
   writeBatch,
   getDocs,
+  query,
+  where,
+  getDocFromServer,
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import { Member, Team, TeamInvitation } from '../types';
@@ -14,7 +17,6 @@ import {
   saveStoredInvitations,
   getStoredMembers,
   getStoredTeams,
-  getStoredInvitations,
   getMemberOwnerKey,
   setMemberOwnerKey,
   generateOwnerKey,
@@ -24,6 +26,22 @@ const MEMBERS_COL = 'members';
 const TEAMS_COL = 'teams';
 const INVITATIONS_COL = 'invitations';
 const BOOKMARKS_COL = 'bookmarks';
+
+/**
+ * Verify network and database connectivity to the provisioned Firestore database
+ */
+export async function testFirestoreConnection(): Promise<boolean> {
+  try {
+    await getDocFromServer(doc(db, MEMBERS_COL, 'connection_probe'));
+    return true;
+  } catch (err: any) {
+    if (err?.message?.includes('the client is offline')) {
+      console.warn('Firestore is offline. Check Firebase configuration and network connection.');
+      return false;
+    }
+    return true;
+  }
+}
 
 /**
  * Subscribe to real-time changes in Member Profiles
@@ -72,7 +90,7 @@ export function subscribeToMembers(
 /**
  * Recursively remove undefined keys so Firestore never throws 'Unsupported field value: undefined'
  */
-function sanitizeForFirestore<T>(data: T): T {
+export function sanitizeForFirestore<T>(data: T): T {
   if (data === null || data === undefined) {
     return null as any;
   }
@@ -207,45 +225,79 @@ export function subscribeToTeams(
 }
 
 /**
- * Persist or update a team in Firestore
+ * Persist or update a team in Firestore.
+ * Propagates errors to the caller so UI can report confirmed writes or handle failures.
  */
 export async function saveTeamToFirestore(team: Team): Promise<void> {
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser) {
+    throw new Error('You must be signed in to save or update a team.');
+  }
+
+  const teamWithCreator: Team = {
+    ...team,
+    creatorUid: team.creatorUid || currentAuthUser.uid,
+  };
+
   try {
     const docRef = doc(db, TEAMS_COL, team.id);
-    await setDoc(docRef, sanitizeForFirestore(team), { merge: true });
-  } catch (err) {
+    await setDoc(docRef, sanitizeForFirestore(teamWithCreator), { merge: true });
+  } catch (err: any) {
     console.error('Error saving team to Firestore:', err);
+    throw err;
   }
 }
 
 /**
- * Batch save multiple teams
+ * Batch save multiple teams.
+ * Propagates errors to the caller so UI only reports success after a confirmed write.
  */
 export async function saveTeamsBatchToFirestore(teamsList: Team[]): Promise<void> {
   if (teamsList.length === 0) return;
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser) {
+    throw new Error('You must be signed in to save teams.');
+  }
+
   try {
     const batch = writeBatch(db);
     teamsList.forEach((team) => {
       const docRef = doc(db, TEAMS_COL, team.id);
-      batch.set(docRef, sanitizeForFirestore(team), { merge: true });
+      const teamWithCreator: Team = {
+        ...team,
+        creatorUid: team.creatorUid || currentAuthUser.uid,
+      };
+      batch.set(docRef, sanitizeForFirestore(teamWithCreator), { merge: true });
     });
     await batch.commit();
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error saving teams batch to Firestore:', err);
+    throw err;
   }
 }
 
 /**
- * Subscribe to real-time changes in Invitations
+ * Subscribe to real-time changes in Invitations scoped to the authenticated user
  */
 export function subscribeToInvitations(
   onUpdate: (invites: TeamInvitation[]) => void,
   onError?: (err: any) => void
 ): () => void {
   try {
+    const currentAuthUser = auth.currentUser;
+    if (!currentAuthUser) {
+      onUpdate([]);
+      return () => {};
+    }
+
     const colRef = collection(db, INVITATIONS_COL);
-    return onSnapshot(
+    const q = query(
       colRef,
+      where('participants', 'array-contains', currentAuthUser.uid)
+    );
+
+    return onSnapshot(
+      q,
       (snapshot) => {
         const list: TeamInvitation[] = [];
         snapshot.forEach((docSnap) => {
@@ -271,14 +323,40 @@ export function subscribeToInvitations(
 }
 
 /**
- * Persist or update an invitation in Firestore
+ * Persist or update an invitation in Firestore.
+ * Automatically derives sender ownership, builds participants list, and propagates errors.
  */
 export async function saveInvitationToFirestore(invite: TeamInvitation): Promise<void> {
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser) {
+    throw new Error('You must be signed in to send or update an invitation.');
+  }
+
+  const senderUid = invite.senderUid || currentAuthUser.uid;
+  const participants = Array.from(
+    new Set(
+      [
+        senderUid,
+        invite.senderId,
+        invite.receiverId,
+        invite.receiverUid,
+        currentAuthUser.uid,
+      ].filter(Boolean) as string[]
+    )
+  );
+
+  const payload: TeamInvitation = {
+    ...invite,
+    senderUid,
+    participants,
+  };
+
   try {
     const docRef = doc(db, INVITATIONS_COL, invite.id);
-    await setDoc(docRef, sanitizeForFirestore(invite), { merge: true });
-  } catch (err) {
+    await setDoc(docRef, sanitizeForFirestore(payload), { merge: true });
+  } catch (err: any) {
     console.error('Error saving invitation to Firestore:', err);
+    throw err;
   }
 }
 
@@ -311,54 +389,88 @@ export function subscribeToBookmarks(
 }
 
 /**
- * Save bookmarks in Firestore
+ * Save bookmarks in Firestore.
+ * Requires authenticated session, sanitizes payload, and propagates errors.
  */
 export async function saveBookmarksToFirestore(
   userId: string,
   savedMemberIds: string[]
 ): Promise<void> {
   if (!userId) return;
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser) {
+    return;
+  }
+
   try {
     const docRef = doc(db, BOOKMARKS_COL, userId);
     await setDoc(
       docRef,
-      {
+      sanitizeForFirestore({
         userId,
         savedMemberIds,
         updatedAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error saving bookmarks to Firestore:', err);
+    throw err;
   }
 }
 
 /**
- * Sync any existing local records to Firestore on startup if Firestore is empty
+ * Safely migrate local user data to Firestore on startup.
+ * Enforces authenticated user ownership, validates required fields,
+ * and sanitizes all payload data to prevent undefined errors or unauthorized writes.
  */
 export async function syncLocalToFirestoreIfEmpty(): Promise<void> {
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser || !currentAuthUser.uid) {
+    // Unauthenticated sessions must never write to Firestore
+    return;
+  }
+
   try {
-    const membersSnap = await getDocs(collection(db, MEMBERS_COL));
+    const userUid = currentAuthUser.uid;
+    const userEmail = currentAuthUser.email?.toLowerCase();
+
+    // 1. Safe migration for user's own member profile if not yet in Firestore
     const localMembers = getStoredMembers();
-    if (membersSnap.empty && localMembers.length > 0) {
-      const batch = writeBatch(db);
-      localMembers.forEach((m) => {
-        batch.set(doc(db, MEMBERS_COL, m.id), m);
-      });
-      await batch.commit();
+    const userLocalProfile = localMembers.find(
+      (m) =>
+        m.ownerUid === userUid ||
+        (userEmail && m.contact?.email?.toLowerCase() === userEmail)
+    );
+
+    if (userLocalProfile && userLocalProfile.name?.trim() && Array.isArray(userLocalProfile.skills) && userLocalProfile.skills.length > 0) {
+      const profileToSync: Member = {
+        ...userLocalProfile,
+        ownerUid: userUid,
+      };
+      const memberId = profileToSync.id || `mem-${userUid.substring(0, 10)}`;
+      await setDoc(doc(db, MEMBERS_COL, memberId), sanitizeForFirestore(profileToSync), { merge: true });
     }
 
-    const teamsSnap = await getDocs(collection(db, TEAMS_COL));
+    // 2. Safe migration for teams created by this user
     const localTeams = getStoredTeams();
-    if (teamsSnap.empty && localTeams.length > 0) {
-      const batch = writeBatch(db);
-      localTeams.forEach((t) => {
-        batch.set(doc(db, TEAMS_COL, t.id), t);
-      });
-      await batch.commit();
+    const userCreatedTeams = localTeams.filter(
+      (t) =>
+        (t.creatorUid === userUid || (userLocalProfile && t.creatorId === userLocalProfile.id)) &&
+        t.name &&
+        t.id
+    );
+
+    if (userCreatedTeams.length > 0) {
+      for (const t of userCreatedTeams) {
+        const teamToSync: Team = {
+          ...t,
+          creatorUid: userUid,
+        };
+        await setDoc(doc(db, TEAMS_COL, t.id), sanitizeForFirestore(teamToSync), { merge: true });
+      }
     }
   } catch (err) {
-    console.warn('Local-to-Firestore initial sync check:', err);
+    console.warn('Local-to-Firestore safe migration note:', err);
   }
 }

@@ -51,6 +51,7 @@ export interface Team {
   description: string;
   creatorId: string;
   creatorName: string;
+  creatorUid?: string;
   members: TeamMemberRole[];
   maxMembers: number;
   requiredSkills: string[];
@@ -77,8 +78,11 @@ export interface TeamInvitation {
   teamName: string;
   senderId: string;
   senderName: string;
+  senderUid?: string;
   receiverId: string;
   receiverName: string;
+  receiverUid?: string;
+  participants?: string[];
   roleProposed: string;
   status: 'pending' | 'accepted' | 'declined';
   message?: string;

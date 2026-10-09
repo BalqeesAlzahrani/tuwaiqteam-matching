@@ -158,6 +158,7 @@ export const TeamBuilder: React.FC<TeamBuilderProps> = ({
       description: description.trim(),
       creatorId: currentUser.id,
       creatorName: currentUser.name,
+      creatorUid: currentUser.ownerUid,
       members: teamMembers,
       maxMembers,
       requiredSkills,
