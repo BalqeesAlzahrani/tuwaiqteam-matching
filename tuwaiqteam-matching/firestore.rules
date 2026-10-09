@@ -1,0 +1,158 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isMemberOwner(memberId) {
+      return exists(/databases/$(database)/documents/members/$(memberId)) &&
+             get(/databases/$(database)/documents/members/$(memberId)).data.ownerUid == request.auth.uid;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Members collection: Public directory for Tuwaiq Club
+    match /members/{memberId} {
+      // 1. All visitors & members can read member profiles to discover teammates
+      allow read: if true;
+
+      // 2. Authenticated user can create their own profile
+      allow create: if isAuthenticated()
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.id == memberId
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0;
+
+      // 3. Authenticated user can only update their own profile; cannot modify others
+      allow update: if isAuthenticated()
+                    && request.resource.data.id == memberId
+                    && request.resource.data.ownerUid == request.auth.uid
+                    && (
+                      // Profile owner matching authenticated UID
+                      resource.data.ownerUid == request.auth.uid
+                      ||
+                      // Legacy profile claim via verified matching email if ownerUid wasn't set
+                      (resource.data.ownerUid == null && resource.data.contact.email != null && request.auth.token.email != null && resource.data.contact.email == request.auth.token.email)
+                    );
+
+      // 4. Authenticated user can only delete their own profile
+      allow delete: if isAuthenticated() && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Teams collection
+    match /teams/{teamId} {
+      // Public read so students can discover open teams
+      allow read: if true;
+
+      // Authenticated user can create a team they own
+      allow create: if isAuthenticated()
+                    && request.resource.data.id == teamId
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && (
+                      request.resource.data.creatorUid == request.auth.uid ||
+                      request.resource.data.creatorId == request.auth.uid ||
+                      (request.resource.data.creatorId is string && isMemberOwner(request.resource.data.creatorId)) ||
+                      request.resource.data.creatorId == 'system'
+                    );
+
+      // Team updates enforce ownership:
+      // Either creator updates, or an authenticated student accepts an invite & joins preserving creator ownership
+      allow update: if isAuthenticated()
+                    && request.resource.data.id == teamId
+                    && (
+                      // 1. Team creator
+                      resource.data.creatorUid == request.auth.uid ||
+                      resource.data.creatorId == request.auth.uid ||
+                      (resource.data.creatorId is string && isMemberOwner(resource.data.creatorId)) ||
+                      // 2. Joining member: may change ONLY the `members` list, by adding exactly one
+                      //    entry that belongs to a member profile they own. Cannot rename the team,
+                      //    change ownership, or remove/alter other members.
+                      (
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+                        && request.resource.data.members is list
+                        && resource.data.members is list
+                        && request.resource.data.members.size() == resource.data.members.size() + 1
+                        && isMemberOwner(request.resource.data.members[request.resource.data.members.size() - 1].memberId)
+                      )
+                    );
+
+      // Only team creator can delete the team
+      allow delete: if isAuthenticated() && (
+        resource.data.creatorUid == request.auth.uid ||
+        resource.data.creatorId == request.auth.uid ||
+        (resource.data.creatorId is string && isMemberOwner(resource.data.creatorId))
+      );
+    }
+
+    // Invitations collection: Strictly private between sender and receiver
+    match /invitations/{invitationId} {
+      // Only sender or receiver can view an invitation (not publicly readable)
+      allow read: if isAuthenticated() && (
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.receiverUid == request.auth.uid ||
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        (resource.data.participants is list && request.auth.uid in resource.data.participants) ||
+        (resource.data.senderId is string && isMemberOwner(resource.data.senderId)) ||
+        (resource.data.receiverId is string && isMemberOwner(resource.data.receiverId))
+      );
+
+      // Only authenticated sender can create an invitation
+      allow create: if isAuthenticated()
+                    && request.resource.data.id == invitationId
+                    && (
+                      request.resource.data.senderUid == request.auth.uid ||
+                      request.resource.data.senderId == request.auth.uid ||
+                      (request.resource.data.senderId is string && isMemberOwner(request.resource.data.senderId))
+                    );
+
+      // Only sender or receiver can update an invitation (accept or decline)
+      allow update: if isAuthenticated()
+                    && request.resource.data.id == invitationId
+                    && (
+                      resource.data.senderUid == request.auth.uid ||
+                      resource.data.receiverUid == request.auth.uid ||
+                      resource.data.senderId == request.auth.uid ||
+                      resource.data.receiverId == request.auth.uid ||
+                      (resource.data.participants is list && request.auth.uid in resource.data.participants) ||
+                      (resource.data.senderId is string && isMemberOwner(resource.data.senderId)) ||
+                      (resource.data.receiverId is string && isMemberOwner(resource.data.receiverId))
+                    );
+
+      // Only sender or receiver can delete an invitation
+      allow delete: if isAuthenticated() && (
+        resource.data.senderUid == request.auth.uid ||
+        resource.data.receiverUid == request.auth.uid ||
+        resource.data.senderId == request.auth.uid ||
+        resource.data.receiverId == request.auth.uid ||
+        (resource.data.participants is list && request.auth.uid in resource.data.participants) ||
+        (resource.data.senderId is string && isMemberOwner(resource.data.senderId)) ||
+        (resource.data.receiverId is string && isMemberOwner(resource.data.receiverId))
+      );
+    }
+
+    // Bookmarks collection: Strictly private to each user
+    match /bookmarks/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create, update: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        request.resource.data.userId == request.auth.uid
+      );
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        resource.data.userId == request.auth.uid
+      );
+    }
+  }
+}

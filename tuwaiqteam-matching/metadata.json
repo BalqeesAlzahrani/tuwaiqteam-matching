@@ -1,0 +1,6 @@
+{
+  "name": "Tuwaiq TeamMatch",
+  "description": "Interactive team matching and skill discovery platform for Tuwaiq Club.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
