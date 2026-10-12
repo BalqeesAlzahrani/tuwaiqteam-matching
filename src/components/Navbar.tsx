@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User } from 'firebase/auth';
 import { Member, TeamInvitation } from '../types';
 import { TuwaiqLogo } from './TuwaiqLogo';
+import { isAdminUser } from '../lib/adminConfig';
 import {
   Compass,
   Users,
@@ -29,7 +30,8 @@ export type NavSection =
   | 'team_generator'
   | 'skill_map'
   | 'my_teams'
-  | 'organizer';
+  | 'organizer'
+  | 'admin';
 
 interface NavbarProps {
   currentSection: NavSection;
@@ -40,6 +42,7 @@ interface NavbarProps {
   onOpenProfileSetup: () => void;
   onOpenSignIn?: () => void;
   onSignOut?: () => void;
+  onDeleteProfile?: () => void;
   pendingInvitations?: TeamInvitation[];
   pendingInvitesCount?: number;
 }
@@ -53,6 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenProfileSetup,
   onOpenSignIn,
   onSignOut,
+  onDeleteProfile,
   pendingInvitations = [],
   pendingInvitesCount,
 }) => {
@@ -78,6 +82,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       badge: pendingCount > 0 ? `${pendingCount}` : undefined,
     },
     { id: 'organizer', label: 'Track Insights', icon: <BarChart3 className="w-4 h-4 text-blue-400" /> },
+    ...(isAdminUser(authUser)
+      ? [{ id: 'admin' as NavSection, label: 'Admin', icon: <Shield className="w-4 h-4 text-rose-400" /> }]
+      : []),
   ];
 
   return (
@@ -188,6 +195,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <UserCheck className="w-4 h-4 text-purple-400" />
                         <span>Edit Profile & Skills</span>
                       </button>
+
+                      {onDeleteProfile && (
+                        <button
+                          id="btn-delete-my-profile"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUserDropdownOpen(false);
+                            onDeleteProfile();
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-rose-300 hover:bg-rose-950/40 flex items-center gap-2"
+                        >
+                          <X className="w-4 h-4 text-rose-400" />
+                          <span>Delete My Profile</span>
+                        </button>
+                      )}
 
                       {onSignOut && (
                         <button
@@ -320,6 +342,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   Edit
                 </button>
+                {onDeleteProfile && (
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      onDeleteProfile();
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-rose-950/60 text-rose-300 text-xs font-semibold hover:bg-rose-900/60"
+                  >
+                    Delete
+                  </button>
+                )}
                 {onSignOut && (
                   <button
                     onClick={() => {

@@ -66,6 +66,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
         senderName: currentUser.name,
         receiverId: targetMember.id,
         receiverName: targetMember.name,
+        receiverUid: targetMember.ownerUid,
         roleProposed: roleProposed.trim(),
         message: message.trim(),
       });
@@ -78,6 +79,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
         senderName: currentUser.name,
         receiverId: targetMember.id,
         receiverName: targetMember.name,
+        receiverUid: targetMember.ownerUid,
         roleProposed: roleProposed.trim(),
         status: 'pending',
         message: message.trim(),

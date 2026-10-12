@@ -106,7 +106,7 @@ export const SignInModal: React.FC<SignInModalProps> = ({
               <p className="text-xs text-purple-300">
                 {mode === 'signup'
                   ? 'Join the Tuwaiq Club talent ecosystem'
-                  : 'Sign in with Firebase Authentication'}
+                  : 'Sign in to your Tuwaiq TeamMatch account'}
               </p>
             </div>
           </div>

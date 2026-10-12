@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
-import { Member, Team, TeamInvitation } from './types';
+import { Member, Team, TeamInvitation, TeamMemberRole } from './types';
 import {
   getStoredMembers,
   getStoredTeams,
@@ -21,6 +21,9 @@ import {
   saveMemberProfile,
   subscribeToTeams,
   saveTeamToFirestore,
+  addMemberToTeam,
+  deleteMemberProfile,
+  deleteTeamById,
   saveTeamsBatchToFirestore,
   subscribeToInvitations,
   saveInvitationToFirestore,
@@ -43,6 +46,8 @@ import { TeamGeneratorView } from './components/TeamGeneratorView';
 import { SkillMap } from './components/SkillMap';
 import { MyTeamsView } from './components/MyTeamsView';
 import { OrganizerDashboard } from './components/OrganizerDashboard';
+import { AdminDashboard } from './components/AdminDashboard';
+import { isAdminUser } from './lib/adminConfig';
 import { MemberProfileModal } from './components/MemberProfileModal';
 import { ProfileSetupModal } from './components/ProfileSetupModal';
 import { InviteModal } from './components/InviteModal';
@@ -294,11 +299,86 @@ export default function App() {
     }
   };
 
+  // Delete my own profile (and my entry in teams I created)
+  const handleDeleteMyProfile = async () => {
+    if (!authUser || !currentUser) return;
+    if (currentUser.ownerUid && currentUser.ownerUid !== authUser.uid) {
+      triggerToast('⚠️ You can only delete your own profile.');
+      return;
+    }
+    const ok = window.confirm(
+      'Delete your profile permanently? You will be removed from teams you created, and your profile will no longer appear in search. This cannot be undone.'
+    );
+    if (!ok) return;
+
+    try {
+      // Remove my entry from teams I created (rules allow the team creator to edit the team)
+      const myCreatedTeams = teams.filter(
+        (t) => t.creatorUid === authUser.uid && t.members.some((m) => m.memberId === currentUser.id)
+      );
+      for (const t of myCreatedTeams) {
+        await saveTeamToFirestore({
+          ...t,
+          members: t.members.filter((m) => m.memberId !== currentUser.id),
+        });
+      }
+
+      await deleteMemberProfile(currentUser.id);
+
+      const nextMembers = members.filter((m) => m.id !== currentUser.id);
+      setMembers(nextMembers);
+      saveStoredMembers(nextMembers);
+      setCurrentUser(null);
+      setCurrentUserId(null);
+      removeStoredCurrentUser();
+      triggerToast('🗑️ Your profile was deleted.');
+    } catch (err: any) {
+      console.error('Failed to delete profile:', err);
+      triggerToast('⚠️ Could not delete your profile. Please try again.');
+    }
+  };
+
+  // Admin: delete any profile / team (enforced again by Firestore rules)
+  const handleAdminDeleteMember = async (member: Member) => {
+    if (!isAdminUser(authUser)) return;
+    try {
+      await deleteMemberProfile(member.id);
+      const nextMembers = members.filter((m) => m.id !== member.id);
+      setMembers(nextMembers);
+      saveStoredMembers(nextMembers);
+      triggerToast(`🗑️ Deleted profile "${member.name}".`);
+    } catch (err: any) {
+      console.error('Admin delete member failed:', err);
+      triggerToast('⚠️ Could not delete the profile (admin permission required).');
+    }
+  };
+
+  const handleAdminDeleteTeam = async (team: Team) => {
+    if (!isAdminUser(authUser)) return;
+    try {
+      await deleteTeamById(team.id);
+      const nextTeams = teams.filter((t) => t.id !== team.id);
+      setTeams(nextTeams);
+      saveStoredTeams(nextTeams);
+      triggerToast(`🗑️ Deleted team "${team.name}".`);
+    } catch (err: any) {
+      console.error('Admin delete team failed:', err);
+      triggerToast('⚠️ Could not delete the team (admin permission required).');
+    }
+  };
+
   // Send Invitation handler
   const handleSendInvite = async (invitationData: Omit<TeamInvitation, 'id' | 'createdAt' | 'status'>) => {
     if (!authUser) {
       triggerToast('⚠️ Please sign in to send invitations.');
       setIsSignInOpen(true);
+      return;
+    }
+
+    if (!invitationData.receiverUid) {
+      triggerToast(
+        `⚠️ ${invitationData.receiverName} has not linked an account to their profile yet, so they cannot receive invitations. Ask them to sign in and save their profile again.`
+      );
       return;
     }
 
@@ -338,31 +418,25 @@ export default function App() {
       const updatedInvite: TeamInvitation = { ...invite, status: 'accepted' };
       await saveInvitationToFirestore(updatedInvite);
 
-      // Add user to team
-      let updatedTeam: Team | null = null;
+      // Add user to team (writes only the `members` field)
+      const memberEntry: TeamMemberRole = {
+        memberId: currentUser.id,
+        role: invite.roleProposed || 'Member',
+        category: currentUser.skillCategories?.[0] || 'TECH',
+      };
+      let joinedTeamId: string | null = null;
       const nextTeams = teams.map((t) => {
         if (t.id === invite.teamId || t.name === invite.teamName) {
           if (!t.members.some((m) => m.memberId === currentUser.id)) {
-            const modTeam = {
-              ...t,
-              members: [
-                ...t.members,
-                {
-                  memberId: currentUser.id,
-                  role: invite.roleProposed,
-                  category: currentUser.skillCategories[0] || 'TECH',
-                },
-              ],
-            };
-            updatedTeam = modTeam;
-            return modTeam;
+            joinedTeamId = t.id;
+            return { ...t, members: [...t.members, memberEntry] };
           }
         }
         return t;
       });
 
-      if (updatedTeam) {
-        await saveTeamToFirestore(updatedTeam);
+      if (joinedTeamId) {
+        await addMemberToTeam(joinedTeamId, memberEntry);
       }
 
       const nextInvites = invitations.map((i) =>
@@ -485,6 +559,7 @@ export default function App() {
         onOpenProfileSetup={handleOpenProfileSetup}
         onOpenSignIn={() => setIsSignInOpen(true)}
         onSignOut={handleSignOut}
+        onDeleteProfile={currentUser ? handleDeleteMyProfile : undefined}
         pendingInvitations={pendingInvites}
         pendingInvitesCount={pendingInvitesCount}
       />
@@ -571,6 +646,15 @@ export default function App() {
             teams={teams}
             onNavigate={setCurrentSection}
             onViewProfile={(m) => setViewingProfileMember(m)}
+          />
+        )}
+
+        {currentSection === 'admin' && isAdminUser(authUser) && (
+          <AdminDashboard
+            members={members}
+            teams={teams}
+            onDeleteMember={handleAdminDeleteMember}
+            onDeleteTeam={handleAdminDeleteTeam}
           />
         )}
       </main>

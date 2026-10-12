@@ -5,12 +5,16 @@ import {
   onSnapshot,
   writeBatch,
   getDocs,
+  getDoc,
+  updateDoc,
+  deleteDoc,
+  arrayUnion,
   query,
   where,
   getDocFromServer,
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-import { Member, Team, TeamInvitation } from '../types';
+import { Member, Team, TeamInvitation, TeamMemberRole } from '../types';
 import {
   saveStoredMembers,
   saveStoredTeams,
@@ -234,18 +238,69 @@ export async function saveTeamToFirestore(team: Team): Promise<void> {
     throw new Error('You must be signed in to save or update a team.');
   }
 
-  const teamWithCreator: Team = {
-    ...team,
-    creatorUid: team.creatorUid || currentAuthUser.uid,
-  };
+  if (!team.id || !team.name?.trim()) {
+    throw new Error('A team needs an id and a name before it can be saved.');
+  }
+
+  // creatorUid is only ever assigned when a team is first created. Defaulting it to the
+  // current user on every save would let a joining member take over an older team.
+  const teamWithCreator: Team = { ...team };
 
   try {
     const docRef = doc(db, TEAMS_COL, team.id);
+    const existing = await getDoc(docRef);
+    if (!existing.exists()) {
+      teamWithCreator.creatorUid = team.creatorUid || currentAuthUser.uid;
+    }
     await setDoc(docRef, sanitizeForFirestore(teamWithCreator), { merge: true });
   } catch (err: any) {
     console.error('Error saving team to Firestore:', err);
     throw err;
   }
+}
+
+/**
+ * Add one member to an existing team by touching ONLY the `members` field.
+ * Used when accepting an invitation, so a joining member can never rewrite team
+ * name, ownership or other members' data (the Firestore rules enforce the same limit).
+ */
+export async function addMemberToTeam(
+  teamId: string,
+  entry: TeamMemberRole
+): Promise<void> {
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser) {
+    throw new Error('You must be signed in to join a team.');
+  }
+  if (!teamId || !entry?.memberId) {
+    throw new Error('Missing team or member id.');
+  }
+  await updateDoc(doc(db, TEAMS_COL, teamId), {
+    members: arrayUnion(sanitizeForFirestore(entry)),
+  });
+}
+
+/**
+ * Delete a member profile document. Firestore rules only allow the profile's owner
+ * (or an admin) to do this.
+ */
+export async function deleteMemberProfile(memberId: string): Promise<void> {
+  if (!auth.currentUser) {
+    throw new Error('You must be signed in to delete a profile.');
+  }
+  if (!memberId) throw new Error('Missing profile id.');
+  await deleteDoc(doc(db, MEMBERS_COL, memberId));
+}
+
+/**
+ * Delete a team document. Only the team creator (or an admin) is allowed by the rules.
+ */
+export async function deleteTeamById(teamId: string): Promise<void> {
+  if (!auth.currentUser) {
+    throw new Error('You must be signed in to delete a team.');
+  }
+  if (!teamId) throw new Error('Missing team id.');
+  await deleteDoc(doc(db, TEAMS_COL, teamId));
 }
 
 /**
@@ -435,6 +490,16 @@ export async function syncLocalToFirestoreIfEmpty(): Promise<void> {
     const userUid = currentAuthUser.uid;
     const userEmail = currentAuthUser.email?.toLowerCase();
 
+    // One-time legacy migration per device and account. Without this guard, a deleted
+    // profile or team could be re-created from an old browser cache on the next sign-in.
+    const migratedKey = `tuwaiq_migrated_${userUid}`;
+    try {
+      if (localStorage.getItem(migratedKey)) return;
+      localStorage.setItem(migratedKey, '1');
+    } catch {
+      return;
+    }
+
     // 1. Safe migration for user's own member profile if not yet in Firestore
     const localMembers = getStoredMembers();
     const userLocalProfile = localMembers.find(
@@ -449,7 +514,12 @@ export async function syncLocalToFirestoreIfEmpty(): Promise<void> {
         ownerUid: userUid,
       };
       const memberId = profileToSync.id || `mem-${userUid.substring(0, 10)}`;
-      await setDoc(doc(db, MEMBERS_COL, memberId), sanitizeForFirestore(profileToSync), { merge: true });
+      const memberRef = doc(db, MEMBERS_COL, memberId);
+      // Only migrate when Firestore has nothing yet; never overwrite newer server data with a stale local cache.
+      const remote = await getDoc(memberRef);
+      if (!remote.exists()) {
+        await setDoc(memberRef, sanitizeForFirestore({ ...profileToSync, id: memberId }), { merge: true });
+      }
     }
 
     // 2. Safe migration for teams created by this user
@@ -467,7 +537,11 @@ export async function syncLocalToFirestoreIfEmpty(): Promise<void> {
           ...t,
           creatorUid: userUid,
         };
-        await setDoc(doc(db, TEAMS_COL, t.id), sanitizeForFirestore(teamToSync), { merge: true });
+        const teamRef = doc(db, TEAMS_COL, t.id);
+        const remoteTeam = await getDoc(teamRef);
+        if (!remoteTeam.exists()) {
+          await setDoc(teamRef, sanitizeForFirestore(teamToSync), { merge: true });
+        }
       }
     }
   } catch (err) {

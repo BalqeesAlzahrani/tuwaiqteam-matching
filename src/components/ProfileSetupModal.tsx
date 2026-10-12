@@ -216,7 +216,7 @@ export const ProfileSetupModal: React.FC<ProfileSetupModalProps> = ({
 
     const effectiveUid = authUser?.uid || auth.currentUser?.uid || profile?.ownerUid;
     if (!effectiveUid) {
-      setErrorMsg('You must be signed in with Firebase Authentication to create or update your profile.');
+      setErrorMsg('Please sign in to create or update your profile.');
       return;
     }
 
