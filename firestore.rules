@@ -8,6 +8,13 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Admin = verified email in this list (keep in sync with src/lib/adminConfig.ts)
+    function isAdmin() {
+      return request.auth != null
+             && request.auth.token.email_verified == true
+             && request.auth.token.email in ['blqees10001@gmail.com'];
+    }
+
     function isMemberOwner(memberId) {
       return exists(/databases/$(database)/documents/members/$(memberId)) &&
              get(/databases/$(database)/documents/members/$(memberId)).data.ownerUid == request.auth.uid;
@@ -43,7 +50,7 @@ service cloud.firestore {
                     );
 
       // 4. Authenticated user can only delete their own profile
-      allow delete: if isAuthenticated() && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isAdmin());
     }
 
     // Teams collection
@@ -86,6 +93,7 @@ service cloud.firestore {
 
       // Only team creator can delete the team
       allow delete: if isAuthenticated() && (
+        isAdmin() ||
         resource.data.creatorUid == request.auth.uid ||
         resource.data.creatorId == request.auth.uid ||
         (resource.data.creatorId is string && isMemberOwner(resource.data.creatorId))
